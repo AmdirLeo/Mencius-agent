@@ -32,6 +32,8 @@ async def health():
 # 静态文件服务（生产模式）
 if os.path.exists("static"):
     app.mount("/", StaticFiles(directory="static", html=True), name="static")
+elif os.path.exists(os.path.join(os.path.dirname(__file__), "../static")):
+    app.mount("/", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "../static"), html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

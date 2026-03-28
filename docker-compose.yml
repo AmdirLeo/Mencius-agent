@@ -1,6 +1,17 @@
 version: '3.8'
 
 services:
+  web:
+    build: .
+    container_name: mencius-agent
+    ports:
+      - "8000:8000"
+    environment:
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - DEBUG=False
+    depends_on:
+      - qdrant
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: mencius-qdrant
