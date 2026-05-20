@@ -57,6 +57,10 @@ const sendMessage = async () => {
   if (!input.value.trim() || loading.value) return
   
   const userMessage = input.value
+  const history = messages.value
+    .slice(-10)
+    .map(({ role, content }) => ({ role, content }))
+
   messages.value.push({
     id: messageId++,
     role: 'user',
@@ -69,7 +73,7 @@ const sendMessage = async () => {
   loading.value = true
   
   try {
-    const response = await apiService.ask(userMessage)
+    const response = await apiService.ask(userMessage, history)
     messages.value.push({
       id: messageId++,
       role: 'assistant',

@@ -5,8 +5,6 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
 # RAG 相关
-langchain>=0.1.0
-langchain-community>=0.0.10
 sentence-transformers>=2.2.2
 faiss-cpu>=1.7.4
 
@@ -15,12 +13,3 @@ zhipuai>=1.0.0
 
 # 数据处理
 numpy>=1.24.0
-pandas>=2.0.0
-
-# 工具库
-requests>=2.31.0
-python-multipart>=0.0.6
-
-# 开发工具
-pytest>=7.4.0
-black>=23.0.0

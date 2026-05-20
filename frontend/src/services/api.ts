@@ -13,10 +13,15 @@ export interface AskResponse {
   }>
 }
 
+export interface ChatHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export const apiService = {
-  async ask(question: string): Promise<AskResponse> {
+  async ask(question: string, history: ChatHistoryMessage[] = []): Promise<AskResponse> {
     try {
-      const response = await apiClient.post<AskResponse>('/ask', { question })
+      const response = await apiClient.post<AskResponse>('/ask', { question, history })
       return response.data
     } catch (error) {
       if (axios.isAxiosError(error)) {

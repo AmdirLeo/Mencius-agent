@@ -6,8 +6,5 @@ cd "$(dirname "$0")"
 echo "🚀 Starting Mencius Agent Backend..."
 echo "Environment: men"
 
-# 确保位于 backend 目录
-cd backend
-
 # 启动 FastAPI 开发服务器
 python -m uvicorn app.main:app --reload --port 8000 --host 0.0.0.0

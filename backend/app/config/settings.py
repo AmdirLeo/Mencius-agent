@@ -9,11 +9,6 @@ class Settings(BaseSettings):
     # LLM
     glm_api_key: str = ""
     
-    # Vector DB
-    vector_db_type: str = "qdrant"
-    vector_db_url: str = "http://localhost:6333"
-    vector_db_collection_name: str = "mencius"
-    
     # Server
     backend_port: int = 8000
     frontend_url: str = "http://localhost:5173"

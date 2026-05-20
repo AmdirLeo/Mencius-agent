@@ -2,7 +2,6 @@ from typing import List, Dict
 import logging
 import numpy as np
 import faiss
-import pickle
 from app.data.embedder import embedder
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,6 @@ class RAGRetriever:
         """Initialize FAISS-based retriever (in-memory, no external service needed)"""
         self.index = None
         self.documents = []
-        self.embeddings = None
         self.embedding_dim = embedder.embedding_dim
         logger.info(f"FAISS Retriever initialized (embedding_dim={self.embedding_dim})")
     
@@ -25,7 +23,6 @@ class RAGRetriever:
             # Using IndexFlatIP for cosine similarity (normalized vectors)
             self.index = faiss.IndexFlatIP(self.embedding_dim)
             self.documents = []
-            self.embeddings = np.zeros((0, self.embedding_dim), dtype=np.float32)
             logger.info(f"Initialized FAISS index in memory (dimension={self.embedding_dim})")
         except Exception as e:
             logger.error(f"Failed to initialize FAISS index: {str(e)}")
@@ -56,7 +53,6 @@ class RAGRetriever:
             
             # Store document metadata
             self.documents.extend(documents)
-            self.embeddings = np.vstack([self.embeddings, embeddings]) if len(self.embeddings) > 0 else embeddings
             
             logger.info(f"Successfully added {len(documents)} documents to FAISS index")
         except Exception as e:

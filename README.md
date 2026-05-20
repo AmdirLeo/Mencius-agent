@@ -352,20 +352,6 @@ pip install -r backend/requirements.txt
 - 检查 API Key 是否已激活（在 [智谱平台](https://open.bigmodel.cn/) 查看）
 - 查看后端日志获取详细错误信息
 
-### ❓ Qdrant 连接失败
-```bash
-# 确保 Docker 正在运行
-docker ps | grep qdrant
-
-# 如果未运行，启动 Qdrant
-docker-compose up -d
-
-# 测试连接
-curl http://localhost:6333/health
-```
-
-
-
 ## 部署说明（未来）
 
 ### 本地生产模式
