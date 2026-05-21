@@ -5,7 +5,7 @@ import os
 
 from app.llm.client import glm_client
 from app.rag.retriever import retriever
-from app.data.loader import load_or_parse_mencius_chapters
+from app.data.loader import load_or_parse_confucian_chapters
 from app.data.chunker import chunk_by_sentences
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class AskResponse(BaseModel):
     status: str = "success"
 
 def build_retrieval_documents(chapters: list) -> list:
-    """Build retrieval documents from structured Mencius chapters."""
+    """Build retrieval documents from structured Confucian chapters."""
     documents = []
     field_labels = {
         "translation": "译文",
@@ -40,11 +40,13 @@ def build_retrieval_documents(chapters: list) -> list:
     }
 
     for chapter in chapters:
+        source_title = chapter.get("source_title", "")
+        source_type = chapter.get("source_type", "")
         book = chapter.get("book", "")
         title = chapter.get("chapter_title", "")
         tags = chapter.get("tags", [])
         tags_text = "、".join(tags)
-        header = " / ".join(part for part in [book, title] if part)
+        header = " / ".join(part for part in [source_title, book, title] if part)
 
         for field, label in field_labels.items():
             content = chapter.get(field, "")
@@ -64,6 +66,8 @@ def build_retrieval_documents(chapters: list) -> list:
                     "text": "\n".join(text_parts),
                     "metadata": {
                         "book": book,
+                        "source_title": source_title,
+                        "source_type": source_type,
                         "chapter_title": title,
                         "chapter_number": chapter.get("chapter_number", 0),
                         "field": field,
@@ -100,7 +104,7 @@ def should_use_rag(question: str) -> bool:
 
 @router.on_event("startup")
 async def initialize_data():
-    """Initialize vector database with Mencius texts on startup"""
+    """Initialize vector database with Confucian texts on startup"""
     global _is_initialized, _initialization_error
     
     try:
@@ -108,18 +112,17 @@ async def initialize_data():
         
         # Use absolute paths from project root
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-        mencius_file = os.path.join(project_root, "data/raw/孟子译注.txt")
-        processed_file = os.path.join(project_root, "data/processed/mencius_chapters.json")
-        mencius_file = os.path.abspath(mencius_file)
+        raw_dir = os.path.join(project_root, "data/raw")
+        processed_file = os.path.join(project_root, "data/processed/confucian_chapters.json")
         
-        if not os.path.exists(mencius_file):
-            logger.warning(f"Mencius file not found: {mencius_file}")
-            _initialization_error = f"Mencius file not found: {mencius_file}"
+        if not os.path.exists(raw_dir):
+            logger.warning(f"Raw data directory not found: {raw_dir}")
+            _initialization_error = f"Raw data directory not found: {raw_dir}"
             return
         
         # Load or parse structured chapters
-        logger.info("Loading Mencius chapters...")
-        chapters = load_or_parse_mencius_chapters(mencius_file, processed_file)
+        logger.info("Loading Confucian chapters...")
+        chapters = load_or_parse_confucian_chapters(raw_dir, processed_file)
         
         # Build structured retrieval documents
         logger.info("Building retrieval documents...")

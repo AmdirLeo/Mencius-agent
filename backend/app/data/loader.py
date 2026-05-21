@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 BOOK_RE = re.compile(r"^(?:[一二三四五六七八九十]+、)?(梁惠王[上下]|公孙丑[上下]|滕文公[上下]|离娄[上下]|万章[上下]|告子[上下]|尽心[上下])\s*$")
 NEXT_TITLE_RE = re.compile(r"^下一篇\((.+?)\)")
+LUNYU_BOOK_RE = re.compile(r"^《论语》(.+?)篇第.+$")
+ZHONGYONG_CHAPTER_RE = re.compile(r"^第[一二三四五六七八九十百]+章$")
 
 BLOCK_MARKERS = {
     "【原文】": "original",
@@ -15,6 +17,13 @@ BLOCK_MARKERS = {
     "【注解】": "annotation",
     "【译文】": "translation",
     "【读解】": "commentary",
+    "【解读】": "commentary",
+    "【评析】": "commentary",
+    "「原文」": "original",
+    "「注释」": "annotation",
+    "「注解」": "annotation",
+    "「译文」": "translation",
+    "「评析」": "commentary",
 }
 
 TAG_KEYWORDS = {
@@ -53,6 +62,23 @@ def load_mencius_text(file_path: str) -> str:
         logger.error(f"Failed to load text from {file_path}: {str(e)}")
         raise Exception(f"Failed to load text: {str(e)}")
 
+def load_text_auto(file_path: str) -> str:
+    """Load raw text with the encodings used by the local source files."""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    last_error = None
+    for encoding in ("utf-8", "gb18030", "gbk"):
+        try:
+            with open(file_path, "r", encoding=encoding) as f:
+                content = f.read()
+            logger.info(f"Loaded {len(content)} characters from {file_path} ({encoding})")
+            return content
+        except UnicodeDecodeError as e:
+            last_error = e
+
+    raise Exception(f"Failed to decode text file {file_path}: {last_error}")
+
 def load_processed_chapters(file_path: str) -> List[Dict[str, str]]:
     """Load structured chapters from a processed JSON file."""
     with open(file_path, "r", encoding="utf-8") as f:
@@ -80,6 +106,48 @@ def load_or_parse_mencius_chapters(raw_file_path: str, processed_file_path: str 
 
     text = load_mencius_text(raw_file_path)
     chapters = parse_mencius_chapters(text)
+
+    if processed_file_path:
+        save_processed_chapters(chapters, processed_file_path)
+
+    return chapters
+
+def load_or_parse_confucian_chapters(raw_dir: str, processed_file_path: str = "") -> List[Dict[str, str]]:
+    """Load or build the combined corpus: Mencius plus Confucian background texts."""
+    source_files = [
+        os.path.join(raw_dir, "孟子译注.txt"),
+        os.path.join(raw_dir, "confucius.txt"),
+        os.path.join(raw_dir, "《大学》全文译注译文.txt"),
+        os.path.join(raw_dir, "中庸.txt"),
+    ]
+
+    if processed_file_path and os.path.exists(processed_file_path):
+        processed_mtime = os.path.getmtime(processed_file_path)
+        source_mtimes = [
+            os.path.getmtime(path)
+            for path in source_files
+            if os.path.exists(path)
+        ]
+        if source_mtimes and processed_mtime >= max(source_mtimes):
+            return load_processed_chapters(processed_file_path)
+
+    chapters: List[Dict[str, str]] = []
+
+    mencius_file = source_files[0]
+    if os.path.exists(mencius_file):
+        chapters.extend(parse_mencius_chapters(load_text_auto(mencius_file)))
+
+    lunyu_file = source_files[1]
+    if os.path.exists(lunyu_file):
+        chapters.extend(parse_lunyu_chapters(load_text_auto(lunyu_file)))
+
+    daxue_file = source_files[2]
+    if os.path.exists(daxue_file):
+        chapters.extend(parse_daxue_chapters(load_text_auto(daxue_file)))
+
+    zhongyong_file = source_files[3]
+    if os.path.exists(zhongyong_file):
+        chapters.extend(parse_zhongyong_chapters(load_text_auto(zhongyong_file)))
 
     if processed_file_path:
         save_processed_chapters(chapters, processed_file_path)
@@ -119,6 +187,28 @@ def _tag_chapter(chapter: Dict[str, str]) -> List[str]:
         if any(keyword in haystack for keyword in keywords):
             tags.append(tag)
     return tags
+
+def _new_chapter(
+    source_type: str,
+    source_title: str,
+    book: str,
+    chapter_title: str,
+    chapter_number: int,
+    authority: int,
+) -> Dict[str, str]:
+    return {
+        "source_type": source_type,
+        "source_title": source_title,
+        "book": book,
+        "chapter_title": chapter_title,
+        "chapter_number": chapter_number,
+        "original": "",
+        "annotation": "",
+        "translation": "",
+        "commentary": "",
+        "tags": [],
+        "authority": authority,
+    }
 
 def parse_mencius_chapters(text: str) -> List[Dict[str, str]]:
     """
@@ -187,6 +277,8 @@ def parse_mencius_chapters(text: str) -> List[Dict[str, str]]:
                 finish_chapter()
                 book_counts[current_book] = book_counts.get(current_book, 0) + 1
                 current_chapter = {
+                    "source_type": "mencius_core",
+                    "source_title": "孟子译注",
                     "book": current_book,
                     "chapter_title": pending_title,
                     "chapter_number": book_counts[current_book],
@@ -195,11 +287,14 @@ def parse_mencius_chapters(text: str) -> List[Dict[str, str]]:
                     "translation": "",
                     "commentary": "",
                     "tags": [],
+                    "authority": 3,
                 }
                 pending_title = ""
             elif current_chapter is None:
                 book_counts[current_book] = book_counts.get(current_book, 0) + 1
                 current_chapter = {
+                    "source_type": "mencius_core",
+                    "source_title": "孟子译注",
                     "book": current_book,
                     "chapter_title": pending_title,
                     "chapter_number": book_counts[current_book],
@@ -208,6 +303,7 @@ def parse_mencius_chapters(text: str) -> List[Dict[str, str]]:
                     "translation": "",
                     "commentary": "",
                     "tags": [],
+                    "authority": 3,
                 }
                 pending_title = ""
 
@@ -233,4 +329,200 @@ def parse_mencius_chapters(text: str) -> List[Dict[str, str]]:
 
     finish_chapter()
     logger.info(f"Parsed {len(chapters)} structured chapters from text")
+    return chapters
+
+def parse_lunyu_chapters(text: str) -> List[Dict[str, str]]:
+    """Parse the local Analects translation/commentary format."""
+    chapters = []
+    current_book = ""
+    current_chapter = None
+    current_block = ""
+    block_lines: List[str] = []
+    chapter_number = 0
+
+    def flush_block():
+        nonlocal block_lines, current_block, current_chapter
+        if current_chapter is not None and current_block:
+            current_chapter[current_block] = _normalize_block(block_lines)
+        block_lines = []
+
+    def finish_chapter():
+        nonlocal current_chapter, current_block, block_lines
+        if current_chapter is None:
+            return
+        flush_block()
+        if any(current_chapter.get(field) for field in ("original", "translation", "commentary")):
+            current_chapter["chapter_title"] = _infer_title(
+                current_chapter,
+                current_chapter["chapter_number"]
+            )
+            current_chapter["tags"] = _tag_chapter(current_chapter)
+            chapters.append(current_chapter)
+        current_chapter = None
+        current_block = ""
+        block_lines = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        book_match = LUNYU_BOOK_RE.match(line)
+        if book_match:
+            finish_chapter()
+            current_book = book_match.group(1)
+            continue
+
+        block_type = _detect_block_type(line)
+        if block_type:
+            if block_type == "original":
+                finish_chapter()
+                chapter_number += 1
+                current_chapter = _new_chapter(
+                    "confucian_background",
+                    "论语译注",
+                    current_book,
+                    "",
+                    chapter_number,
+                    2,
+                )
+            elif current_chapter is None:
+                continue
+
+            flush_block()
+            current_block = block_type
+            block_lines = [line]
+            continue
+
+        if current_block and current_chapter is not None:
+            block_lines.append(line)
+
+    finish_chapter()
+    logger.info(f"Parsed {len(chapters)} Analects chapters from text")
+    return chapters
+
+def parse_daxue_chapters(text: str) -> List[Dict[str, str]]:
+    """Parse the local Great Learning translation/commentary format."""
+    chapters = []
+    pending_title = ""
+    current_chapter = None
+    current_block = ""
+    block_lines: List[str] = []
+    chapter_number = 0
+
+    def flush_block():
+        nonlocal block_lines, current_block, current_chapter
+        if current_chapter is not None and current_block:
+            current_chapter[current_block] = _normalize_block(block_lines)
+        block_lines = []
+
+    def finish_chapter():
+        nonlocal current_chapter, current_block, block_lines
+        if current_chapter is None:
+            return
+        flush_block()
+        if any(current_chapter.get(field) for field in ("original", "translation", "commentary")):
+            if not current_chapter.get("chapter_title"):
+                current_chapter["chapter_title"] = _infer_title(
+                    current_chapter,
+                    current_chapter["chapter_number"]
+                )
+            current_chapter["tags"] = _tag_chapter(current_chapter)
+            chapters.append(current_chapter)
+        current_chapter = None
+        current_block = ""
+        block_lines = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        block_type = _detect_block_type(line)
+        if block_type:
+            if block_type == "original":
+                finish_chapter()
+                chapter_number += 1
+                current_chapter = _new_chapter(
+                    "confucian_background",
+                    "大学译注",
+                    "大学",
+                    pending_title,
+                    chapter_number,
+                    2,
+                )
+                pending_title = ""
+            elif current_chapter is None:
+                continue
+
+            flush_block()
+            current_block = block_type
+            block_lines = [line]
+            continue
+
+        if current_block and current_chapter is not None:
+            block_lines.append(line)
+            continue
+
+        if len(line) <= 60:
+            pending_title = line
+
+    finish_chapter()
+    logger.info(f"Parsed {len(chapters)} Great Learning chapters from text")
+    return chapters
+
+def parse_zhongyong_chapters(text: str) -> List[Dict[str, str]]:
+    """Parse the local Doctrine of the Mean text. It has no translation field."""
+    chapters = []
+    current_chapter = None
+    original_lines: List[str] = []
+    commentary_lines: List[str] = []
+    in_commentary = False
+    chapter_number = 0
+
+    def finish_chapter():
+        nonlocal current_chapter, original_lines, commentary_lines, in_commentary
+        if current_chapter is None:
+            return
+        current_chapter["original"] = _normalize_block(original_lines)
+        current_chapter["commentary"] = _normalize_block(commentary_lines)
+        if current_chapter["original"] or current_chapter["commentary"]:
+            current_chapter["tags"] = _tag_chapter(current_chapter)
+            chapters.append(current_chapter)
+        current_chapter = None
+        original_lines = []
+        commentary_lines = []
+        in_commentary = False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if ZHONGYONG_CHAPTER_RE.match(line):
+            finish_chapter()
+            chapter_number += 1
+            current_chapter = _new_chapter(
+                "confucian_background",
+                "中庸",
+                "中庸",
+                line,
+                chapter_number,
+                2,
+            )
+            continue
+
+        if current_chapter is None:
+            continue
+
+        if line.startswith("右第"):
+            in_commentary = True
+
+        if in_commentary:
+            commentary_lines.append(line)
+        else:
+            original_lines.append(line)
+
+    finish_chapter()
+    logger.info(f"Parsed {len(chapters)} Doctrine of the Mean chapters from text")
     return chapters
