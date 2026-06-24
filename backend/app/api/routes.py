@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+import hashlib
+import json
 import logging
 import os
 
@@ -7,6 +9,7 @@ from app.llm.client import glm_client
 from app.rag.retriever import retriever
 from app.data.loader import load_or_parse_confucian_chapters
 from app.data.chunker import chunk_by_sentences
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,13 @@ class AskResponse(BaseModel):
     answer: str
     sources: list = []
     status: str = "success"
+
+RAW_SOURCE_FILES = [
+    "孟子译注.txt",
+    "confucius.txt",
+    "《大学》全文译注译文.txt",
+    "中庸.txt",
+]
 
 def build_retrieval_documents(chapters: list) -> list:
     """Build retrieval documents from structured Confucian chapters."""
@@ -102,6 +112,61 @@ def should_use_rag(question: str) -> bool:
 
     return True
 
+def build_corpus_fingerprint(raw_dir: str) -> dict:
+    """Build a stable fingerprint for source files and embedding settings."""
+    files = []
+    digest = hashlib.sha256()
+
+    for filename in RAW_SOURCE_FILES:
+        path = os.path.join(raw_dir, filename)
+        if not os.path.exists(path):
+            continue
+
+        file_hash = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                file_hash.update(chunk)
+
+        stat = os.stat(path)
+        file_info = {
+            "name": filename,
+            "size": stat.st_size,
+            "sha256": file_hash.hexdigest(),
+        }
+        files.append(file_info)
+        digest.update(filename.encode("utf-8"))
+        digest.update(str(stat.st_size).encode("utf-8"))
+        digest.update(file_info["sha256"].encode("utf-8"))
+
+    return {
+        "version": 1,
+        "embedding_model": settings.embedding_model,
+        "embedding_dim": retriever.embedding_dim,
+        "chunk_target_chars": 450,
+        "files": files,
+        "sha256": digest.hexdigest(),
+    }
+
+def load_manifest(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_manifest(path: str, manifest: dict):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+def can_load_cached_index(manifest: dict, fingerprint: dict, index_path: str, documents_path: str) -> bool:
+    return (
+        manifest.get("sha256") == fingerprint.get("sha256")
+        and manifest.get("embedding_model") == fingerprint.get("embedding_model")
+        and manifest.get("chunk_target_chars") == fingerprint.get("chunk_target_chars")
+        and os.path.exists(index_path)
+        and os.path.exists(documents_path)
+    )
+
 @router.on_event("startup")
 async def initialize_data():
     """Initialize vector database with Confucian texts on startup"""
@@ -114,11 +179,27 @@ async def initialize_data():
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
         raw_dir = os.path.join(project_root, "data/raw")
         processed_file = os.path.join(project_root, "data/processed/confucian_chapters.json")
+        index_file = os.path.join(project_root, "data/processed/faiss.index")
+        documents_file = os.path.join(project_root, "data/processed/faiss_documents.json")
+        embedding_cache_file = os.path.join(project_root, "data/processed/embedding_cache.npz")
+        manifest_file = os.path.join(project_root, "data/processed/faiss_manifest.json")
         
         if not os.path.exists(raw_dir):
             logger.warning(f"Raw data directory not found: {raw_dir}")
             _initialization_error = f"Raw data directory not found: {raw_dir}"
             return
+
+        fingerprint = build_corpus_fingerprint(raw_dir)
+        manifest = load_manifest(manifest_file)
+        if can_load_cached_index(manifest, fingerprint, index_file, documents_file):
+            try:
+                logger.info("Loading cached FAISS index...")
+                retriever.load(index_file, documents_file)
+                _is_initialized = True
+                logger.info("Successfully loaded cached vector database")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to load cached FAISS index, rebuilding: {str(e)}")
         
         # Load or parse structured chapters
         logger.info("Loading Confucian chapters...")
@@ -133,8 +214,9 @@ async def initialize_data():
         # Initialize FAISS index and add documents
         if len(documents) > 0:
             try:
-                retriever.init_collection()
-                retriever.add_documents(documents)
+                retriever.build_from_documents_cached(documents, embedding_cache_file)
+                retriever.save(index_file, documents_file)
+                save_manifest(manifest_file, fingerprint)
                 logger.info("Successfully initialized vector database")
                 _is_initialized = True
             except Exception as e:

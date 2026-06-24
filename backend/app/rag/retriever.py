@@ -1,7 +1,10 @@
 from typing import List, Dict
+import hashlib
 import logging
 import numpy as np
 import faiss
+import json
+import os
 from app.data.embedder import embedder
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,134 @@ class RAGRetriever:
         except Exception as e:
             logger.error(f"Failed to add documents to FAISS: {str(e)}")
             raise
+
+    def build_from_documents(self, documents: List[Dict[str, any]], batch_size: int = 100):
+        """Create a new in-memory FAISS index from documents."""
+        self.init_collection()
+        self.add_documents(documents, batch_size=batch_size)
+
+    def build_from_documents_cached(
+        self,
+        documents: List[Dict[str, any]],
+        embedding_cache_path: str,
+        batch_size: int = 100,
+    ):
+        """
+        Create a FAISS index while reusing cached embeddings by document text hash.
+
+        If one source file is added or changed, unchanged chunks reuse their old
+        vectors and only new/changed chunks are embedded again.
+        """
+        if not documents:
+            self.init_collection()
+            return
+
+        cache = self._load_embedding_cache(embedding_cache_path)
+        ordered_hashes = [self._hash_text(doc["text"]) for doc in documents]
+        unique_missing_hashes = []
+        unique_missing_texts = []
+        seen_missing = set()
+
+        for doc_hash, doc in zip(ordered_hashes, documents):
+            if doc_hash in cache or doc_hash in seen_missing:
+                continue
+            seen_missing.add(doc_hash)
+            unique_missing_hashes.append(doc_hash)
+            unique_missing_texts.append(doc["text"])
+
+        if unique_missing_texts:
+            logger.info(
+                f"Embedding {len(unique_missing_texts)} new/changed documents "
+                f"({len(documents)} total documents)"
+            )
+            new_embeddings = embedder.embed_batch(unique_missing_texts, batch_size=batch_size)
+            new_embeddings = new_embeddings / np.linalg.norm(new_embeddings, axis=1, keepdims=True)
+            for doc_hash, embedding in zip(unique_missing_hashes, new_embeddings):
+                cache[doc_hash] = embedding.astype(np.float32)
+        else:
+            logger.info(f"Reusing cached embeddings for all {len(documents)} documents")
+
+        embeddings = np.vstack([cache[doc_hash] for doc_hash in ordered_hashes]).astype(np.float32)
+        self.index = faiss.IndexFlatIP(self.embedding_dim)
+        self.index.add(embeddings)
+        self.documents = documents
+
+        self._save_embedding_cache(embedding_cache_path, ordered_hashes, cache)
+        logger.info(f"Built FAISS index with {len(documents)} documents")
+
+    def save(self, index_path: str, documents_path: str):
+        """Persist FAISS index and document metadata to disk."""
+        if self.index is None:
+            raise RuntimeError("Index not initialized")
+
+        os.makedirs(os.path.dirname(index_path), exist_ok=True)
+        faiss.write_index(self.index, index_path)
+        with open(documents_path, "w", encoding="utf-8") as f:
+            json.dump(self.documents, f, ensure_ascii=False)
+        logger.info(f"Saved FAISS index to {index_path} and documents to {documents_path}")
+
+    def load(self, index_path: str, documents_path: str):
+        """Load persisted FAISS index and document metadata from disk."""
+        self.index = faiss.read_index(index_path)
+        with open(documents_path, "r", encoding="utf-8") as f:
+            self.documents = json.load(f)
+
+        if self.index.d != self.embedding_dim:
+            raise RuntimeError(
+                f"Index dimension mismatch: index={self.index.d}, model={self.embedding_dim}"
+            )
+        if self.index.ntotal != len(self.documents):
+            raise RuntimeError(
+                f"Index/document count mismatch: index={self.index.ntotal}, docs={len(self.documents)}"
+            )
+
+        logger.info(f"Loaded FAISS index with {self.index.ntotal} vectors from {index_path}")
+
+    def _hash_text(self, text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _load_embedding_cache(self, embedding_cache_path: str) -> Dict[str, np.ndarray]:
+        if not os.path.exists(embedding_cache_path):
+            return {}
+
+        try:
+            data = np.load(embedding_cache_path, allow_pickle=False)
+            hashes = data["hashes"].astype(str)
+            embeddings = data["embeddings"].astype(np.float32)
+            if embeddings.shape[1] != self.embedding_dim:
+                logger.warning("Ignoring embedding cache due to dimension mismatch")
+                return {}
+            return {
+                doc_hash: embedding
+                for doc_hash, embedding in zip(hashes, embeddings)
+            }
+        except Exception as e:
+            logger.warning(f"Ignoring invalid embedding cache: {str(e)}")
+            return {}
+
+    def _save_embedding_cache(
+        self,
+        embedding_cache_path: str,
+        ordered_hashes: List[str],
+        cache: Dict[str, np.ndarray],
+    ):
+        os.makedirs(os.path.dirname(embedding_cache_path), exist_ok=True)
+
+        unique_hashes = []
+        seen = set()
+        for doc_hash in ordered_hashes:
+            if doc_hash in seen:
+                continue
+            seen.add(doc_hash)
+            unique_hashes.append(doc_hash)
+
+        embeddings = np.vstack([cache[doc_hash] for doc_hash in unique_hashes]).astype(np.float32)
+        np.savez(
+            embedding_cache_path,
+            hashes=np.array(unique_hashes),
+            embeddings=embeddings,
+        )
+        logger.info(f"Saved embedding cache with {len(unique_hashes)} vectors to {embedding_cache_path}")
     
     async def retrieve(self, query: str, top_k: int = 3) -> List[Dict]:
         """
