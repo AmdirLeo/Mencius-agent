@@ -132,10 +132,10 @@ Mencius-agent/
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| question | string | 用户问题（必需） |
-| top_k | integer | 检索相关段落数（默认3） |
+| 字段     | 类型    | 说明                    |
+| -------- | ------- | ----------------------- |
+| question | string  | 用户问题（必需）        |
+| top_k    | integer | 检索相关段落数（默认3） |
 
 **响应 - 成功**
 ```json
@@ -161,9 +161,9 @@ Mencius-agent/
 }
 ```
 
-| 状态 | 说明 |
-|------|------|
-| `success` | 正常，使用 LLM 生成 |
+| 状态                | 说明                 |
+| ------------------- | -------------------- |
+| `success`           | 正常，使用 LLM 生成  |
 | `fallback_rag_only` | LLM 不可用，返回原文 |
 
 ### GET `/api/status` - 系统状态
@@ -276,36 +276,14 @@ EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
 
 ## 📦 技术栈
 
-| 组件 | 技术 |
-|------|------|
+| 组件     | 技术                      |
+| -------- | ------------------------- |
 | 前端框架 | Vue 3 + TypeScript + Vite |
-| 后端框架 | FastAPI + Uvicorn |
-| LLM | 智谱 GLM-4-Flash API |
-| 向量库 | FAISS (内存) |
-| 向量模型 | sentence-transformers |
-| 数据源 | 孟子译注 (txt) |
-
----
-
-## 🔒 已完成的功能
-
-✅ FastAPI 后端框架  
-✅ Vue 3 前端界面  
-✅ RAG 检索系统 (FAISS)  
-✅ LLM 集成 (GLM-4-Flash)  
-✅ 孟子风格提示词  
-✅ API 错误回退机制  
-✅ 孟子数据加载与向量化  
-
----
-
-## 🚧 计划功能
-
-- [ ] 用户对话历史记录
-- [ ] 孟子观点引用功能
-- [ ] 多轮对话上下文保留
-- [ ] 用户反馈收集
-- [ ] Docker 容器化部署
+| 后端框架 | FastAPI + Uvicorn         |
+| LLM      | 智谱 GLM-4-Flash API      |
+| 向量库   | FAISS (内存)              |
+| 向量模型 | sentence-transformers     |
+| 数据源   | 孟子译注 (txt)            |
 
 ---
 
@@ -318,20 +296,6 @@ MIT License
 ## 🤝 反馈与贡献
 
 欢迎提交 Issue 和 Pull Request！
-
----
-
-**最后更新**: 2026年3月7日  
-**状态**: 核心功能可用 ✅
-
-7. 日志系统完善
-8. 性能优化（缓存、批处理）
-
-### 🟢 低优先级
-9. 单元测试编写
-10. Docker 容器化
-11. 云部署配置
-12. 用户认证系统（如需）
 
 ## 常见问题
 
@@ -352,28 +316,6 @@ pip install -r backend/requirements.txt
 - 检查 API Key 是否已激活（在 [智谱平台](https://open.bigmodel.cn/) 查看）
 - 查看后端日志获取详细错误信息
 
-## 部署说明（未来）
-
-### 本地生产模式
-```bash
-# 1. 构建前端
-npm run build --prefix frontend
-
-# 2. 启动后端（后端会提供前端静态文件）
-python -m uvicorn app.main:app --port 8000
-
-# 访问：http://localhost:8000
-```
-
-### 云平台部署（预计）
-```bash
-# 打包 Docker 镜像
-docker build -t mencius-agent .
-
-# 推送到云平台
-docker tag mencius-agent your-registry/mencius-agent
-docker push your-registry/mencius-agent
-```
 
 ### 修改聊天界面样式
 
